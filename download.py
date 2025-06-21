@@ -19,45 +19,125 @@ def check_ffmpeg_installation(ffmpeg_path):
         return False
 
 def find_ffmpeg_in_path():
-    """Try to find FFmpeg in system PATH"""
+    """Try to find FFmpeg using environment variables and PATH"""
+    # Method 1: Check PATH environment variable directly
+    path_env = os.environ.get('PATH', '')
+    if path_env:
+        # Split PATH by semicolon on Windows, colon on Unix
+        path_separator = ';' if os.name == 'nt' else ':'
+        path_dirs = path_env.split(path_separator)
+        
+        # Look for ffmpeg in each PATH directory
+        ffmpeg_names = ['ffmpeg.exe', 'ffmpeg'] if os.name == 'nt' else ['ffmpeg']
+        for directory in path_dirs:
+            directory = directory.strip()
+            if not directory:
+                continue
+            try:
+                for ffmpeg_name in ffmpeg_names:
+                    ffmpeg_path = os.path.join(directory, ffmpeg_name)
+                    if os.path.isfile(ffmpeg_path) and check_ffmpeg_installation(ffmpeg_path):
+                        return ffmpeg_path
+            except (OSError, IOError):
+                continue
+    
+    # Method 2: Check common environment variables
+    env_vars_to_check = [
+        'FFMPEG_PATH',
+        'FFMPEG_HOME',
+        'FFMPEG_DIR',
+    ]
+    
+    for env_var in env_vars_to_check:
+        env_path = os.environ.get(env_var)
+        if env_path:
+            # Try the path directly
+            if os.path.isfile(env_path) and check_ffmpeg_installation(env_path):
+                return env_path
+            # Try adding /bin/ffmpeg.exe
+            bin_path = os.path.join(env_path, 'bin', 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+            if os.path.isfile(bin_path) and check_ffmpeg_installation(bin_path):
+                return bin_path
+            # Try adding ffmpeg.exe directly
+            direct_path = os.path.join(env_path, 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+            if os.path.isfile(direct_path) and check_ffmpeg_installation(direct_path):
+                return direct_path
+    
+    # Method 3: Fallback to subprocess if environment variable method fails
     try:
+        # First check if ffmpeg command works
         result = subprocess.run(['ffmpeg', '-version'], 
                               capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
-            return 'ffmpeg'  # Return just the command name if found in PATH
+            # Try to get the full path using subprocess
+            try:
+                if os.name == 'nt':  # Windows
+                    # Try PowerShell Get-Command first (more reliable for WinGet installations)
+                    ps_result = subprocess.run(['powershell', '-Command', '(Get-Command ffmpeg).Source'], 
+                                             capture_output=True, text=True, timeout=10)
+                    if ps_result.returncode == 0 and ps_result.stdout.strip():
+                        return ps_result.stdout.strip()
+                    
+                    # Try 'where' command as backup
+                    where_result = subprocess.run(['where', 'ffmpeg'], 
+                                                capture_output=True, text=True, timeout=5)
+                    if where_result.returncode == 0 and where_result.stdout.strip():
+                        paths = where_result.stdout.strip().split('\n')
+                        if paths and paths[0].strip():
+                            return paths[0].strip()
+                        
+                else:  # Linux/Mac
+                    which_result = subprocess.run(['which', 'ffmpeg'], 
+                                                capture_output=True, text=True, timeout=5)
+                    if which_result.returncode == 0:
+                        path = which_result.stdout.strip()
+                        if path:
+                            return path
+            except:
+                pass
+            # Return 'ffmpeg' if it works but we can't get the full path
+            return 'ffmpeg'
     except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
         pass
+    
     return None
 
 def get_default_ffmpeg_path():
     """Get the default FFmpeg path, checking common locations"""
-    # Primary default path
-    primary_default = "C:/tools/ffmpeg/bin/ffmpeg.exe"
-    
     # Common FFmpeg installation paths on Windows
     common_paths = [
         "C:/tools/ffmpeg/bin/ffmpeg.exe",
         "C:/ffmpeg/bin/ffmpeg.exe",
         "C:/Program Files/ffmpeg/bin/ffmpeg.exe",
-        "C:/Program Files (x86)/ffmpeg/bin/ffmpeg.exe"
+        "C:/Program Files (x86)/ffmpeg/bin/ffmpeg.exe",
+        "C:/ProgramData/chocolatey/bin/ffmpeg.exe"
     ]
     
-    # Check if FFmpeg is in PATH first
+    # Check if FFmpeg is in PATH first (highest priority)
     path_ffmpeg = find_ffmpeg_in_path()
     if path_ffmpeg:
         return path_ffmpeg
     
-    # Check if primary default exists and works
-    if os.path.exists(primary_default) and check_ffmpeg_installation(primary_default):
-        return primary_default
-    
-    # Check other common installation paths
-    for path in common_paths[1:]:  # Skip the first one since we already checked it
+    # Check all common installation paths
+    for path in common_paths:
         if os.path.exists(path) and check_ffmpeg_installation(path):
             return path
     
-    # Return the primary default path even if not found (user will need to change it)
-    return primary_default
+    # If nothing is found, return empty string to indicate no valid path found
+    return ""
+
+def get_downloads_folder():
+    """Get the user's Downloads folder path"""
+    if os.name == 'nt':  # Windows
+        downloads_path = os.path.join(os.path.expanduser('~'), 'Downloads')
+    else:  # Linux/Mac
+        downloads_path = os.path.join(os.path.expanduser('~'), 'Downloads')
+    
+    # Create Downloads folder if it doesn't exist
+    if not os.path.exists(downloads_path):
+        os.makedirs(downloads_path)
+    
+    return downloads_path
 
 class CustomLogger:
     def __init__(self, log_queue):
@@ -158,7 +238,15 @@ def download_highest_resolution(url, output_path='.', ffmpeg_path=None, log_queu
 class YouTubeDownloaderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("YouTube Video Downloader")
+        self.root.title("YouTube Video Downloader v2.1.0")
+        
+        # Set window icon if available
+        try:
+            if os.path.exists("icon.ico"):
+                self.root.iconbitmap("icon.ico")
+        except:
+            pass  # Continue without icon if not available
+        
         self.ffmpeg_path = get_default_ffmpeg_path()
         self.log_queue = queue.Queue()
         self.download_success = False
@@ -177,22 +265,41 @@ class YouTubeDownloaderApp:
         self.url_entry = ttk.Entry(main_frame, width=50)
         self.url_entry.grid(row=0, column=1, columnspan=2, padx=5, pady=5, sticky=tk.EW)
 
-        # Directory Entry
+        # Directory Entry with default Downloads folder
         dir_label = ttk.Label(main_frame, text="Output Directory:")
         dir_label.grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
         self.dir_entry = ttk.Entry(main_frame, width=40)
         self.dir_entry.grid(row=1, column=1, padx=5, pady=5, sticky=tk.EW)
+        # Set default to Downloads folder
+        self.dir_entry.insert(0, get_downloads_folder())
         browse_button = ttk.Button(main_frame, text="Browse", command=self.browse_directory)
         browse_button.grid(row=1, column=2, padx=5, pady=5)
 
         # FFmpeg Location Entry
         ffmpeg_label = ttk.Label(main_frame, text="FFmpeg Location:")
         ffmpeg_label.grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
-        self.ffmpeg_entry = ttk.Entry(main_frame, width=40)
+        self.ffmpeg_entry = ttk.Entry(main_frame, width=35)
         self.ffmpeg_entry.grid(row=2, column=1, padx=5, pady=5, sticky=tk.EW)
-        self.ffmpeg_entry.insert(0, self.ffmpeg_path)
-        ffmpeg_browse_button = ttk.Button(main_frame, text="Browse", command=self.browse_ffmpeg)
-        ffmpeg_browse_button.grid(row=2, column=2, padx=5, pady=5)
+        # Set the FFmpeg path if found
+        if self.ffmpeg_path:
+            self.ffmpeg_entry.insert(0, self.ffmpeg_path)
+        else:
+            # Add placeholder text for better UX
+            self.ffmpeg_entry.insert(0, "Click Browse to locate ffmpeg.exe")
+            self.ffmpeg_entry.config(foreground="gray")
+            # Bind events to handle placeholder text
+            self.ffmpeg_entry.bind("<FocusIn>", self.on_ffmpeg_entry_focus)
+            self.ffmpeg_entry.bind("<FocusOut>", self.on_ffmpeg_entry_unfocus)
+        
+        # Create a frame for FFmpeg buttons
+        ffmpeg_buttons_frame = ttk.Frame(main_frame)
+        ffmpeg_buttons_frame.grid(row=2, column=2, padx=5, pady=5)
+        
+        ffmpeg_browse_button = ttk.Button(ffmpeg_buttons_frame, text="Browse", command=self.browse_ffmpeg)
+        ffmpeg_browse_button.grid(row=0, column=0, padx=(0, 2))
+        
+        ffmpeg_detect_button = ttk.Button(ffmpeg_buttons_frame, text="Auto-Detect", command=self.auto_detect_ffmpeg)
+        ffmpeg_detect_button.grid(row=0, column=1, padx=(2, 0))
 
         # Download Button
         self.download_button = ttk.Button(main_frame, text="Download", command=self.start_download)
@@ -256,11 +363,14 @@ class YouTubeDownloaderApp:
     def validate_ffmpeg(self):
         """Validate FFmpeg installation and update UI accordingly"""
         ffmpeg_path = self.ffmpeg_entry.get().strip()
-        if check_ffmpeg_installation(ffmpeg_path):
+        if ffmpeg_path and check_ffmpeg_installation(ffmpeg_path):
             self.status_label.config(text="FFmpeg found and ready to use", foreground="green")
             self.download_button.config(state=tk.NORMAL)
         else:
-            self.status_label.config(text="FFmpeg not found. Please locate FFmpeg installation.", foreground="red")
+            if not ffmpeg_path:
+                self.status_label.config(text="FFmpeg not detected. Please browse to locate FFmpeg installation.", foreground="orange")
+            else:
+                self.status_label.config(text="FFmpeg not found at specified path. Please verify the path.", foreground="red")
             self.download_button.config(state=tk.DISABLED)
 
     def browse_directory(self):
@@ -268,6 +378,34 @@ class YouTubeDownloaderApp:
         if directory:
             self.dir_entry.delete(0, tk.END)
             self.dir_entry.insert(0, directory)
+
+    def on_ffmpeg_entry_focus(self, event):
+        """Handle focus event on FFmpeg entry to clear placeholder text"""
+        if self.ffmpeg_entry.get() == "Click Browse to locate ffmpeg.exe":
+            self.ffmpeg_entry.delete(0, tk.END)
+            self.ffmpeg_entry.config(foreground="black")
+
+    def on_ffmpeg_entry_unfocus(self, event):
+        """Handle unfocus event on FFmpeg entry to restore placeholder if empty"""
+        if not self.ffmpeg_entry.get().strip():
+            self.ffmpeg_entry.insert(0, "Click Browse to locate ffmpeg.exe")
+            self.ffmpeg_entry.config(foreground="gray")
+
+    def auto_detect_ffmpeg(self):
+        """Auto-detect FFmpeg location and update the entry field"""
+        # Clear the current entry
+        self.ffmpeg_entry.delete(0, tk.END)
+        self.ffmpeg_entry.config(foreground="black")
+        
+        # Try to detect FFmpeg
+        detected_path = get_default_ffmpeg_path()
+        if detected_path:
+            self.ffmpeg_entry.insert(0, detected_path)
+            self.validate_ffmpeg()
+        else:
+            self.ffmpeg_entry.insert(0, "FFmpeg not found - please use Browse")
+            self.ffmpeg_entry.config(foreground="red")
+            self.status_label.config(text="FFmpeg not found automatically. Please use Browse button.", foreground="red")
 
     def browse_ffmpeg(self):
         file_path = filedialog.askopenfilename(
@@ -277,6 +415,7 @@ class YouTubeDownloaderApp:
         if file_path:
             self.ffmpeg_entry.delete(0, tk.END)
             self.ffmpeg_entry.insert(0, file_path)
+            self.ffmpeg_entry.config(foreground="black")  # Ensure text is visible
             self.validate_ffmpeg()
 
     def start_download(self):

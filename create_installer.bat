@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo YouTube Downloader Installer v2.0
+echo YouTube Downloader Installer v2.1.0
 echo ========================================
 echo.
 
@@ -11,6 +11,9 @@ if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
 echo Copying executable...
 copy "dist\YouTube_Downloader.exe" "%INSTALL_DIR%\"
+
+echo Copying icon...
+if exist "icon.ico" copy "icon.ico" "%INSTALL_DIR%\"
 
 echo.
 echo ========================================
