@@ -54,6 +54,8 @@ cd yt-downloader
 ```bash
 # Create virtual environment
 python -m venv .venv
+#or
+python3 -m venv .venv
 
 # Activate virtual environment
 # Windows PowerShell:
@@ -61,6 +63,9 @@ python -m venv .venv
 
 # Windows Command Prompt:
 .venv\Scripts\activate.bat
+
+# Mac Terminal Prompt:
+source .venv/bin/activate
 ```
 
 ### 3. Install Dependencies

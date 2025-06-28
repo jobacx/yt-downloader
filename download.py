@@ -199,22 +199,38 @@ class ProgressHook:
         elif d['status'] == 'error':
             self.log_queue.put(f"[ERROR] {d.get('error', 'Unknown error')}")
 
-def download_highest_resolution(url, output_path='.', ffmpeg_path=None, log_queue=None):
+def download_highest_resolution(url, output_path='.', ffmpeg_path=None, log_queue=None, format_type='mp4'):
     progress_hook = ProgressHook(log_queue) if log_queue else None
     custom_logger = CustomLogger(log_queue) if log_queue else None
     
-    ydl_opts = {
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-        'outtmpl': f'{output_path}/%(title)s.%(ext)s',
-        'merge_output_format': 'mp4',  # Merge into MP4
-        'postprocessors': [{
-            'key': 'FFmpegVideoConvertor',
-            'preferedformat': 'mp4',  # Ensure MP4 output
-        }],
-        'progress_hooks': [progress_hook] if progress_hook else [],
-        'logger': custom_logger,
-        'verbose': True,
-    }
+    if format_type == 'mp3':
+        # Audio-only download for MP3
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': f'{output_path}/%(title)s.%(ext)s',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '320',
+            }],
+            'progress_hooks': [progress_hook] if progress_hook else [],
+            'logger': custom_logger,
+            'verbose': True,
+        }
+    else:
+        # Video download for MP4 (existing logic)
+        ydl_opts = {
+            'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+            'outtmpl': f'{output_path}/%(title)s.%(ext)s',
+            'merge_output_format': 'mp4',  # Merge into MP4
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',  # Ensure MP4 output
+            }],
+            'progress_hooks': [progress_hook] if progress_hook else [],
+            'logger': custom_logger,
+            'verbose': True,
+        }
     
     # Add FFmpeg location if provided
     if ffmpeg_path:
@@ -226,7 +242,8 @@ def download_highest_resolution(url, output_path='.', ffmpeg_path=None, log_queu
             
         # Add final success message
         if log_queue:
-            log_queue.put("[SUCCESS] Download and processing completed successfully!")
+            format_name = format_type.upper()
+            log_queue.put(f"[SUCCESS] {format_name} download and processing completed successfully!")
             
         return True
         
@@ -265,21 +282,39 @@ class YouTubeDownloaderApp:
         self.url_entry = ttk.Entry(main_frame, width=50)
         self.url_entry.grid(row=0, column=1, columnspan=2, padx=5, pady=5, sticky=tk.EW)
 
+        # Format Selection
+        format_label = ttk.Label(main_frame, text="Download Format:")
+        format_label.grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        
+        # Create frame for radio buttons
+        format_frame = ttk.Frame(main_frame)
+        format_frame.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky=tk.W)
+        
+        # Format selection variable
+        self.format_var = tk.StringVar(value="mp4")
+        
+        # Radio buttons for format selection
+        mp4_radio = ttk.Radiobutton(format_frame, text="MP4 (Video)", variable=self.format_var, value="mp4")
+        mp4_radio.grid(row=0, column=0, padx=(0, 10))
+        
+        mp3_radio = ttk.Radiobutton(format_frame, text="MP3 (Audio Only)", variable=self.format_var, value="mp3")
+        mp3_radio.grid(row=0, column=1)
+
         # Directory Entry with default Downloads folder
         dir_label = ttk.Label(main_frame, text="Output Directory:")
-        dir_label.grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        dir_label.grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
         self.dir_entry = ttk.Entry(main_frame, width=40)
-        self.dir_entry.grid(row=1, column=1, padx=5, pady=5, sticky=tk.EW)
+        self.dir_entry.grid(row=2, column=1, padx=5, pady=5, sticky=tk.EW)
         # Set default to Downloads folder
         self.dir_entry.insert(0, get_downloads_folder())
         browse_button = ttk.Button(main_frame, text="Browse", command=self.browse_directory)
-        browse_button.grid(row=1, column=2, padx=5, pady=5)
+        browse_button.grid(row=2, column=2, padx=5, pady=5)
 
         # FFmpeg Location Entry
         ffmpeg_label = ttk.Label(main_frame, text="FFmpeg Location:")
-        ffmpeg_label.grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+        ffmpeg_label.grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
         self.ffmpeg_entry = ttk.Entry(main_frame, width=35)
-        self.ffmpeg_entry.grid(row=2, column=1, padx=5, pady=5, sticky=tk.EW)
+        self.ffmpeg_entry.grid(row=3, column=1, padx=5, pady=5, sticky=tk.EW)
         # Set the FFmpeg path if found
         if self.ffmpeg_path:
             self.ffmpeg_entry.insert(0, self.ffmpeg_path)
@@ -293,7 +328,7 @@ class YouTubeDownloaderApp:
         
         # Create a frame for FFmpeg buttons
         ffmpeg_buttons_frame = ttk.Frame(main_frame)
-        ffmpeg_buttons_frame.grid(row=2, column=2, padx=5, pady=5)
+        ffmpeg_buttons_frame.grid(row=3, column=2, padx=5, pady=5)
         
         ffmpeg_browse_button = ttk.Button(ffmpeg_buttons_frame, text="Browse", command=self.browse_ffmpeg)
         ffmpeg_browse_button.grid(row=0, column=0, padx=(0, 2))
@@ -303,24 +338,24 @@ class YouTubeDownloaderApp:
 
         # Download Button
         self.download_button = ttk.Button(main_frame, text="Download", command=self.start_download)
-        self.download_button.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky=tk.EW)
+        self.download_button.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky=tk.EW)
 
         # Status Label
         self.status_label = ttk.Label(main_frame, text="")
-        self.status_label.grid(row=4, column=0, columnspan=3, padx=5, pady=5)
+        self.status_label.grid(row=5, column=0, columnspan=3, padx=5, pady=5)
 
         # Log Display
         log_label = ttk.Label(main_frame, text="Download Logs:")
-        log_label.grid(row=5, column=0, columnspan=3, padx=5, pady=(10, 5), sticky=tk.W)
+        log_label.grid(row=6, column=0, columnspan=3, padx=5, pady=(10, 5), sticky=tk.W)
         
         # Create scrolled text widget for logs
         self.log_text = scrolledtext.ScrolledText(main_frame, height=15, width=80, 
                                                  font=('Consolas', 9), bg='black', fg='white')
-        self.log_text.grid(row=6, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
+        self.log_text.grid(row=7, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
 
         # Configure grid weights to make widgets expand
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(6, weight=1)
+        main_frame.rowconfigure(7, weight=1)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
@@ -422,6 +457,7 @@ class YouTubeDownloaderApp:
         url = self.url_entry.get().strip()
         directory = self.dir_entry.get().strip() or '.'  # Default to current directory if empty
         ffmpeg_path = self.ffmpeg_entry.get().strip()
+        format_type = self.format_var.get()  # Get selected format
         
         if not url:
             messagebox.showerror("Error", "Please enter a YouTube URL.")
@@ -440,21 +476,22 @@ class YouTubeDownloaderApp:
         
         # Disable the download button during download
         self.download_button.config(state=tk.DISABLED)
-        self.status_label.config(text="Downloading...", foreground="black")
+        format_name = format_type.upper()
+        self.status_label.config(text=f"Downloading {format_name}...", foreground="black")
         
         # Add initial log message
-        self.append_log(f"Starting download for: {url}\n")
+        self.append_log(f"Starting {format_name} download for: {url}\n")
         self.append_log(f"Output directory: {directory}\n")
         self.append_log(f"FFmpeg path: {ffmpeg_path}\n")
         self.append_log("-" * 50 + "\n")
         
         # Start the download in a thread
-        thread = threading.Thread(target=self.download_thread, args=(url, directory, ffmpeg_path))
+        thread = threading.Thread(target=self.download_thread, args=(url, directory, ffmpeg_path, format_type))
         thread.start()
 
-    def download_thread(self, url, directory, ffmpeg_path):
+    def download_thread(self, url, directory, ffmpeg_path, format_type):
         try:
-            success = download_highest_resolution(url, directory, ffmpeg_path, self.log_queue)
+            success = download_highest_resolution(url, directory, ffmpeg_path, self.log_queue, format_type)
             # Give a moment for all logs to be processed
             time.sleep(1)
             self.root.after(0, self.on_download_complete, True, None)
